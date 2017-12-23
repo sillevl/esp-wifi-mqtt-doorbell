@@ -4,9 +4,9 @@ import utime
 import ubinascii
 import webrepl
 
-from umqtt.simple import MQTTClient
+from umqtt.robust import MQTTClient
 
-
+doorbell = True
 
 class ConfigManager:
 
@@ -14,7 +14,8 @@ class ConfigManager:
     CONFIG = {
         "broker": "192.168.1.50",
         "button_pin": 12, 
-        "led_pin": 14,
+        "led_pin_1": 14,
+        "led_pin_2": 16,
         "client_id": b"esp8266_" + ubinascii.hexlify(machine.unique_id()),
         "topic": b"doorbell",
     }
@@ -50,12 +51,10 @@ class Button:
     DEBOUNCE = 50
 
     def __init__(self, pin_number):
-        self.pin = machine.Pin(pin_number, machine.Pin.IN)
+        self.pin = machine.Pin(pin_number, machine.Pin.IN, machine.Pin.PULL_UP)
         self.handler = None
     
     def handle(self, pin):
-        # current_value = pin.value()
-        # print(current_value)
         active = True
         count = 0
         while(count < self.DEBOUNCE):
@@ -72,20 +71,28 @@ class Button:
 
 
 class Led:
-    LED_ON_TIME = 500
+    LED_BLINK_TIME = 500
 
-    def __init__(self, pin_number):
-        self.pin = machine.Pin(pin_number, machine.Pin.OUT)
+    def __init__(self, pin_number_1, pin_number_2):
+        self.pin1 = machine.Pin(pin_number_1, machine.Pin.OUT)
+        self.pin2 = machine.Pin(pin_number_2, machine.Pin.OUT)
+        self.on()
 
     def on(self):
-        self.pin.on()
+        self.pin1.on()
+        self.pin2.on()
 
     def off(self):
-        self.pin.off()
+        self.pin1.off()
+        self.pin2.off()
 
     def blink(self):
-        # TODO
-        print("Blinking led")
+        for i in range(0,20):
+            self.off()
+            utime.sleep_ms(200)
+            self.on()
+            utime.sleep_ms(200)
+        self.on()
 
 class Mqtt:
     def __init__(self, client_id, broker):
@@ -95,7 +102,6 @@ class Mqtt:
         print("Connected to {}".format(broker))
 
     def publish(self, topic, message):
-        print(self.client_id)
         self.client.publish(
             '{}/{}'.format(
                 topic,
@@ -104,44 +110,43 @@ class Mqtt:
             message
         )
 
-# def button_pressed(self):
-#     global time_since_last_press
-#     global time_led_off
-#     global led_pin
-#     if (time.ticks_ms() > (time_since_last_press + DEBOUNCE)):
-#         print("Button pressed")
-#         led_pin.on()
-#         time_led_off = time.ticks_ms() + LED_ON_TIME
-#     time_since_last_press = time.ticks_ms()
-#     if time.ticks_ms() > time_led_off:
-#         led_pin.off()
-    
-
-def main():
-    #while True:
-    #    data = sensor_pin.value()
-    #    client.publish('{}/{}'.format(CONFIG['topic'],
-    #                                      CONFIG['client_id']),
-    #                                      bytes(str(data), 'utf-8'))
-    #    print('Sensor state: {}'.format(data))
-    #    time.sleep(5)
-    time.sleep(10)
 
 def button_handler(pin):
     print("Button pressed")
-    mqtt.publish(config['topic'], "{'button': 'pressed'}")
+    try:
+        mqtt.publish(config['topic'], "{'button': 'pressed'}")
+        led.blink()
+    except Exception as msg:
+        print(msg)
+        for i in range(0,66):
+            led.off()
+            utime.sleep_ms(100)
+            led.on()
+            utime.sleep_ms(50)
 
 
-if __name__ == '__main__':
-    config_manager = ConfigManager()
-    config = config_manager.get_config()
+# if __name__ == '__main__':
+print("Doorbell application")
+config_manager = ConfigManager()
+config = config_manager.get_config()
 
-    button = Button(config['button_pin'])
-    led = Led(config['led_pin'])
-    mqtt = Mqtt(config['client_id'],config['broker'])
+button = Button(config['button_pin'])
+led = Led(config['led_pin_1'], config['led_pin_2'])
 
-    button.set_handler(button_handler)
+button.set_handler(button_handler)
 
-    led.on()
-    time.sleep(10)
-    led.off()
+mqtt = False
+while not mqtt:
+    try:
+        mqtt = Mqtt(config['client_id'],config['broker'])
+    except Exception as msg:
+        print("MQTT Not connected, trying again in 5 seconds")
+        for i in range(0,3):
+            led.off()
+            utime.sleep_ms(200)
+            led.on()
+            utime.sleep_ms(100)
+        time.sleep(5)
+    
+
+time.sleep(5)
